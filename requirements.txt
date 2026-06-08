@@ -1,0 +1,53 @@
+# Data ingestion — Alpaca
+alpaca-py==0.43.4
+
+# Data ingestion — Binance
+python-binance==1.0.36
+
+# Kafka
+kafka-python==2.3.2
+
+# Spark
+pyspark==4.1.2
+
+# Data processing
+pandas==3.0.3
+numpy==2.4.6
+yfinance==1.4.1
+ta==0.11.0
+
+# Anomaly detection
+scikit-learn==1.9.0
+
+# API
+fastapi==0.136.3
+uvicorn==0.49.0
+pydantic==2.13.4
+
+# Snowflake
+snowflake-connector-python==4.6.0
+snowflake-sqlalchemy==1.10.0
+
+# dbt
+dbt-core==1.11.11
+dbt-snowflake==1.11.5
+
+# Data quality
+great-expectations==1.18.0
+
+# AWS
+boto3==1.43.24
+
+# Utilities
+python-dotenv==1.2.2
+loguru==0.7.3
+httpx==0.28.1
+websocket-client==1.9.0
+
+# Testing
+pytest==9.0.3
+pytest-asyncio==1.4.0
+
+# Async support
+aiohttp==3.14.1
+websockets==16.0
