@@ -113,36 +113,19 @@ async def kafka_sender(producer: KafkaProducer, queue: asyncio.Queue):
         pass  # clean exit when task is cancelled
 
 
-async def _watcher(shutdown_event: asyncio.Event,
-                   ws_task: asyncio.Task,
-                   kafka_task: asyncio.Task):
-    """Waits for shutdown signal then cancels both running tasks."""
-    await shutdown_event.wait()
-    logger.info("Shutdown event — cancelling tasks...")
-    ws_task.cancel()
-    kafka_task.cancel()
-
-
 async def run_stream(producer: KafkaProducer, shutdown_event: asyncio.Event):
     """
     Opens Alpaca WebSocket, subscribes to trades for all
     watchlist symbols, publishes each trade to Kafka.
+    Uses stream.stop() for clean shutdown instead of task cancellation.
     """
-
-    logger.info(f"Connecting to Kafka → {KAFKA_BOOTSTRAP_SERVERS}")
-
-    # ── Internal asyncio queue — decouples WS from Kafka ───────
     queue: asyncio.Queue = asyncio.Queue(maxsize=INTERNAL_QUEUE_SIZE)
 
-    # ── SSL context ─────────────────────────────────────────────
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-
-    # ── Alpaca StockDataStream with explicit feed + SSL ─────────
     stream = StockDataStream(
         ALPACA_API_KEY,
         ALPACA_API_SECRET,
-        feed=DataFeed.IEX,  # explicit: IEX (free) or SIP (paid)
-        raw_data=False,  # use parsed Trade objects
+        feed=DataFeed.IEX,
+        raw_data=False,
     )
 
     async def on_trade(trade: Trade):
@@ -158,24 +141,40 @@ async def run_stream(producer: KafkaProducer, shutdown_event: asyncio.Event):
 
     logger.info(f"Subscribed to {len(WATCHLIST)} symbols on IEX feed")
     logger.info("Streaming live trades... (Ctrl+C to stop)")
-    logger.info("Note: trades only flow during US market hours "
-                "(9:30am–4:00pm EST / 2:30pm–9:00pm BST)")
-
-    # ── Create tasks explicitly so we can cancel them ───────────
-    ws_task = asyncio.create_task(stream._run_forever(), name="ws-task")
-    kafka_task = asyncio.create_task(kafka_sender(producer, queue), name="kafka-task")
-
-    watcher_task = asyncio.create_task(
-        _watcher(shutdown_event, ws_task, kafka_task),
-        name="watcher-task"
+    logger.info(
+        "Note: trades only flow during US market hours "
+        "(9:30am–4:00pm EST / 2:30pm–9:00pm BST)"
     )
 
+    kafka_task = asyncio.create_task(
+        kafka_sender(producer, queue), name="kafka-task"
+    )
+
+    # ── Shutdown watcher ────────────────────────────────────────
+    # Calls stream.stop() — lets _run_forever() exit naturally
+    # instead of cancelling it abruptly (which leaves WebSocket threads hanging)
+    async def shutdown_watcher():
+        await shutdown_event.wait()
+        logger.info("Stopping Alpaca stream...")
+        stream.stop()        # ← proper public API, closes WebSocket from within
+        kafka_task.cancel()  # ← safe to cancel now — stream has stopped
+
+    watcher_task = asyncio.create_task(shutdown_watcher(), name="watcher-task")
+
     try:
-        await asyncio.gather(ws_task, kafka_task, watcher_task,
-                             return_exceptions=True)
+        # _run_forever() exits cleanly when stream.stop() is called
+        await stream._run_forever()
+    except Exception as e:
+        if not shutdown_event.is_set():
+            raise  # only re-raise if this wasn't an intentional shutdown
     finally:
-        watcher_task.cancel()  # clean up watcher if stream exited naturally
-        # Flush Kafka — no stream.close() needed, ws_task.cancel() handles it
+        # Clean up both tasks regardless of how we got here
+        watcher_task.cancel()
+        kafka_task.cancel()
+        try:
+            await kafka_task
+        except asyncio.CancelledError:
+            pass
         logger.info("Stream stopped.")
 
 
