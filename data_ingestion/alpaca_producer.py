@@ -9,7 +9,6 @@ from alpaca.data.live import StockDataStream
 from alpaca.data.models import Trade
 from alpaca.data import DataFeed
 import certifi
-import ssl
 import signal
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -156,7 +155,7 @@ async def run_stream(producer: KafkaProducer, shutdown_event: asyncio.Event):
     async def shutdown_watcher():
         await shutdown_event.wait()
         logger.info("Stopping Alpaca stream...")
-        stream.stop()        # ← proper public API, closes WebSocket from within
+        stream.stop()  # ← proper public API, closes WebSocket from within
         kafka_task.cancel()  # ← safe to cancel now — stream has stopped
 
     watcher_task = asyncio.create_task(shutdown_watcher(), name="watcher-task")
